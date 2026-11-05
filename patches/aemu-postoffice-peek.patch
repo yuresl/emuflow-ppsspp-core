@@ -1,0 +1,135 @@
+diff --git a/client/sock_impl_linux.c b/client/sock_impl_linux.c
+index c1071a2..4d257d9 100644
+--- a/client/sock_impl_linux.c
++++ b/client/sock_impl_linux.c
+@@ -155,7 +155,7 @@ int native_connect_tcp_sock(const struct aemu_postoffice_sock_addr *addr4, const
+ 	setsockopt(sock, SOL_SOCKET, SO_SNDBUF, &sockopt, sizeof(sockopt));
+ 	setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &sockopt, sizeof(sockopt));
+ 
+-	#ifndef __linux__
++	#ifdef SO_NOSIGPIPE
+ 	sockopt = 1;
+ 	setsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &sockopt, sizeof(sockopt));
+ 	#endif
+@@ -177,7 +177,7 @@ int native_connect_tcp_sock(const struct aemu_postoffice_sock_addr *addr4, const
+ 	get_ret = getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &sockopt, &opt_len);
+ 	LOG("%s: SO_RCVBUF is %d (0x%x)\n", __func__, sockopt, get_ret == -1 ? errno : 0);
+ 
+-	#ifndef __linux__
++	#ifdef SO_NOSIGPIPE
+ 	opt_len = sizeof(sockopt);
+ 	sockopt = 0;
+ 	get_ret = getsockopt(sock, SOL_SOCKET, SO_NOSIGPIPE, &sockopt, &opt_len);
+@@ -205,7 +205,50 @@ int native_send(int fd, const char *buf, int len){
+ 	return write_status;
+ }
+ 
++
++#ifdef __EMSCRIPTEN__
++// emuflow-peek: o SOCKFS ignora MSG_PEEK, e recv tira os bytes da fila. O que foi espiado fica aqui.
++#include <pthread.h>
++#include <stdlib.h>
++#define PEEK_SLOTS 64
++#define PEEK_CAPACITY (64 * 1024)
++static struct { int fd; int len; char *data; } peek_slots[PEEK_SLOTS];
++static pthread_mutex_t peek_mutex = PTHREAD_MUTEX_INITIALIZER;
++static bool peek_ready = false;
++
++static int peek_slot(int fd, bool create) {
++	if (!peek_ready) {
++		for (int i = 0; i < PEEK_SLOTS; i++) peek_slots[i].fd = -1;
++		peek_ready = true;
++	}
++	for (int i = 0; i < PEEK_SLOTS; i++) if (peek_slots[i].fd == fd) return i;
++	if (!create) return -1;
++	for (int i = 0; i < PEEK_SLOTS; i++) {
++		if (peek_slots[i].fd == -1) {
++			peek_slots[i].fd = fd;
++			peek_slots[i].len = 0;
++			if (!peek_slots[i].data) peek_slots[i].data = (char *)malloc(PEEK_CAPACITY);
++			return i;
++		}
++	}
++	return -1;
++}
++#endif
++
+ int native_recv(int fd, char *buf, int len){
++#ifdef __EMSCRIPTEN__
++	pthread_mutex_lock(&peek_mutex);
++	int held = peek_slot(fd, false);
++	if (held >= 0 && peek_slots[held].len > 0) {
++		int take = peek_slots[held].len < len ? peek_slots[held].len : len;
++		memcpy(buf, peek_slots[held].data, take);
++		peek_slots[held].len -= take;
++		memmove(peek_slots[held].data, peek_slots[held].data + take, peek_slots[held].len);
++		pthread_mutex_unlock(&peek_mutex);
++		return take;
++	}
++	pthread_mutex_unlock(&peek_mutex);
++#endif
+ 	int recv_status = recv(fd, buf, len, 0);
+ 	if (recv_status == 0){
+ 		return recv_status;
+@@ -223,10 +266,45 @@ int native_recv(int fd, char *buf, int len){
+ }
+ 
+ int native_close_tcp_sock(int sock){
++#ifdef __EMSCRIPTEN__
++	pthread_mutex_lock(&peek_mutex);
++	int held = peek_slot(sock, false);
++	if (held >= 0) {
++		peek_slots[held].fd = -1;
++		peek_slots[held].len = 0;
++	}
++	pthread_mutex_unlock(&peek_mutex);
++#endif
+ 	return close(sock);
+ }
+ 
+ int native_peek(int fd, char *buf, int len){
++#ifdef __EMSCRIPTEN__
++	pthread_mutex_lock(&peek_mutex);
++	int slot = peek_slot(fd, true);
++	if (slot < 0 || len > PEEK_CAPACITY) {
++		pthread_mutex_unlock(&peek_mutex);
++		return -1;
++	}
++	int closed = 0;
++	while (peek_slots[slot].len < len) {
++		int got = recv(fd, peek_slots[slot].data + peek_slots[slot].len, len - peek_slots[slot].len, 0);
++		if (got > 0) {
++			peek_slots[slot].len += got;
++			continue;
++		}
++		if (got == 0) closed = 1;
++		else if (errno != EAGAIN && errno != EWOULDBLOCK) closed = -1;
++		break;
++	}
++	int have = peek_slots[slot].len < len ? peek_slots[slot].len : len;
++	if (have > 0) memcpy(buf, peek_slots[slot].data, have);
++	pthread_mutex_unlock(&peek_mutex);
++	if (have > 0) return have;
++	if (closed > 0) return 0;
++	if (closed < 0) return -1;
++	return AEMU_POSTOFFICE_CLIENT_SESSION_WOULD_BLOCK;
++#endif
+ 	int read_result = recv(fd, buf, len, MSG_PEEK);
+ 	if (read_result == 0){
+ 		return 0;
+@@ -243,6 +321,15 @@ int native_peek(int fd, char *buf, int len){
+ }
+ 
+ void native_wait(int fd, bool for_write, int timeout_ms){
++#ifdef __EMSCRIPTEN__
++	if (!for_write) {
++		pthread_mutex_lock(&peek_mutex);
++		int held = peek_slot(fd, false);
++		bool ready = held >= 0 && peek_slots[held].len > 0;
++		pthread_mutex_unlock(&peek_mutex);
++		if (ready) return;
++	}
++#endif
+ 	struct pollfd pfd = {
+ 		.fd = fd,
+ 		.events = for_write ? POLLOUT : POLLIN,

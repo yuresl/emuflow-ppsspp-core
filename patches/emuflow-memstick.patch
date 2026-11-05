@@ -1,0 +1,14 @@
+diff --git a/libretro/libretro.cpp b/libretro/libretro.cpp
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -1256,6 +1256,10 @@
+       libretro_supports_bitmasks = true;
+
+    g_Config.Load("", "");
++   // emuflow-memstick: 16 GB é exatamente 2^34. Jogos antigos, como o Sonic Rivals, fazem a conta do espaço
++   // livre em 32 bits, ficam com 0 e dizem que não há espaço. Com 9 GB, o tamanho que o PPSSPP usava antes,
++   // a mesma conta dá 1 GB.
++   g_Config.iMemStickSizeGB = 9;
+    g_Config.iInternalResolution = 0;
+
+    // Log levels must be set after g_Config.Load

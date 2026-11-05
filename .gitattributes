@@ -1,0 +1,6 @@
+# Rodam no Linux da imagem de build, e o fetch.sh aplica os patches sem converter nada.
+*.patch -text
+*.sh text eol=lf
+*.py text eol=lf
+*.env text eol=lf
+Dockerfile text eol=lf

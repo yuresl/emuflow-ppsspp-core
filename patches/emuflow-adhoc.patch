@@ -1,0 +1,51 @@
+diff --git a/Core/HLE/proAdhoc.cpp b/Core/HLE/proAdhoc.cpp
+index 6b301d54c..b6838e8fa 100644
+--- a/Core/HLE/proAdhoc.cpp
++++ b/Core/HLE/proAdhoc.cpp
+@@ -1423,6 +1423,17 @@ static void ResolveAdhocServer() {
+ 	auto n = GetI18NCategory(I18NCat::NETWORKING);
+ 
+ 	// Resolve and cache AdhocServer DNS
++#ifdef __EMSCRIPTEN__
++	// emuflow-adhoc: o endereço é fixo e atendido no próprio navegador; não há DNS.
++	{
++		const std::lock_guard<std::mutex> adhoc_server_ip_guard(g_adhocServerIPMutex);
++		g_adhocServerIP.in.sin_family = AF_INET;
++		g_adhocServerIP.in.sin_addr.s_addr = inet_addr(g_Config.sProAdhocServer.c_str());
++		g_adhocServerIP.in.sin_port = htons(SERVER_PORT);
++	}
++	clearLocalIpCache();
++	return;
++#endif
+ 	addrinfo* resolved = nullptr;
+ 	std::string err;
+ 	if (g_Config.bEnableWlan && !net::DNSResolve(g_Config.sProAdhocServer, "", &resolved, err)) {
+@@ -1920,6 +1931,11 @@ void clearLocalIpCache() {
+ }
+ 
+ int getRelativeLocalIpFromRoutingTable(const in_addr &target_ip, in_addr &local_ip_out) {
++#ifdef __EMSCRIPTEN__
++	// emuflow-adhoc: no navegador não há tabela de rotas, e o relay não usa este endereço.
++	local_ip_out.s_addr = inet_addr("10.127.0.2");
++	return 0;
++#endif
+ 	const std::lock_guard<std::mutex> local_ip_cache_guard(localIpCacheMutex);
+ 
+ 	auto cached_ip = localIpCache.find(target_ip.s_addr);
+diff --git a/libretro/libretro.cpp b/libretro/libretro.cpp
+index 26168c94c..360fe1f55 100644
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -1094,6 +1094,12 @@ static void check_variables(CoreParameter &coreParam)
+    else
+       g_Config.sProAdhocServer = changeProAdhocServer;
+ 
++   // emuflow-adhoc: o ad hoc passa sempre pelo relay, que o site atende no navegador.
++   g_Config.iAdhocServerRelayMode = (int)AdhocServerRelayMode::AlwaysOn;
++   g_Config.sProAdhocServer = "10.127.0.1";
++   g_Config.bEnableAdhocServer = false;
++   g_Config.bAdhocUseUdp = false;
++
+    g_Config.bTexHardwareScaling = g_Config.sTextureShaderName != "Off";
+ 
+    if (gpu && (g_Config.iTexScalingType != iTexScalingType_prev

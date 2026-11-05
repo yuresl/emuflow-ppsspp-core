@@ -1,0 +1,867 @@
+diff --git a/Common/CommonFuncs.h b/Common/CommonFuncs.h
+index b9153ba0f..31e3a38a9 100644
+--- a/Common/CommonFuncs.h
++++ b/Common/CommonFuncs.h
+@@ -71,7 +71,7 @@
+ 
+ #if defined(_MSC_VER)
+ #include <cstdlib>
+-#elif (PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64))
++#elif (PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)) && !defined(__EMSCRIPTEN__)
+ #include <x86intrin.h>
+ #endif
+ 
+@@ -90,7 +90,7 @@
+ inline u32 __rotl(u32 x, int shift) {
+ #if defined(_MSC_VER)
+ 	return _rotl(x, shift);
+-#elif (PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64))
++#elif (PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)) && !defined(__EMSCRIPTEN__)
+ 	return __rold(x, shift);
+ #else
+ 	shift &= 31;
+@@ -113,7 +113,7 @@ inline u64 __rotl64(u64 x, unsigned int shift){
+ inline u32 __rotr(u32 x, int shift) {
+ #if defined(_MSC_VER)
+ 	return _rotr(x, shift);
+-#elif (PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64))
++#elif (PPSSPP_ARCH(X86) || PPSSPP_ARCH(AMD64)) && !defined(__EMSCRIPTEN__)
+ 	return __rord(x, shift);
+ #else
+     shift &= 31;
+diff --git a/Common/GPU/OpenGL/GLCommon.h b/Common/GPU/OpenGL/GLCommon.h
+index 09dd8dee7..f8021f378 100644
+--- a/Common/GPU/OpenGL/GLCommon.h
++++ b/Common/GPU/OpenGL/GLCommon.h
+@@ -5,6 +5,10 @@
+ #if PPSSPP_PLATFORM(IOS)
+ #include <OpenGLES/ES3/gl.h>
+ #include <OpenGLES/ES3/glext.h>
++#elif defined(__EMSCRIPTEN__)
++#include <GLES3/gl3.h>
++#include <GLES2/gl2ext.h>
++#define GL_BGRA_EXT 0x80E1
+ #elif defined(USING_GLES2)
+ #include <GLES2/gl2.h>
+ #include <GLES2/gl2ext.h>
+diff --git a/Common/GPU/OpenGL/GLMemory.cpp b/Common/GPU/OpenGL/GLMemory.cpp
+index 71b01e876..0a1d6f6e9 100644
+--- a/Common/GPU/OpenGL/GLMemory.cpp
++++ b/Common/GPU/OpenGL/GLMemory.cpp
+@@ -25,7 +25,7 @@ void *GLRBuffer::Map(GLBufferStrategy strategy) {
+ 			if (!hasStorage_) {
+ 				GLbitfield storageFlags = access & ~(GL_MAP_INVALIDATE_BUFFER_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
+ #ifdef USING_GLES2
+-#ifdef GL_EXT_buffer_storage
++#if defined(GL_EXT_buffer_storage) && !defined(__EMSCRIPTEN__)
+ 				glBufferStorageEXT(target_, size_, nullptr, storageFlags);
+ #endif
+ #else
+diff --git a/Common/GPU/OpenGL/GLProfiler.cpp b/Common/GPU/OpenGL/GLProfiler.cpp
+index 27a2a695d..5eb135edc 100644
+--- a/Common/GPU/OpenGL/GLProfiler.cpp
++++ b/Common/GPU/OpenGL/GLProfiler.cpp
+@@ -121,8 +121,10 @@ void GLProfiler::BeginFrame() {
+ 			}
+ 
+ 			GLuint64 startTime = 0, endTime = 0;
++#ifndef __EMSCRIPTEN__
+ 			glGetQueryObjectui64v(queries_[scope.startQueryId], GL_QUERY_RESULT, &startTime);
+ 			glGetQueryObjectui64v(queries_[scope.endQueryId], GL_QUERY_RESULT, &endTime);
++#endif
+ 
+ 			// Times are in nanoseconds, convert to milliseconds
+ 			double milliseconds = (double)(endTime - startTime) / 1000000.0;
+@@ -154,7 +156,9 @@ void GLProfiler::Begin(const char *fmt, ...) {
+ 	scopeStack_.push_back(scopes_.size());
+ 	scopes_.push_back(scope);
+ 
++#ifndef __EMSCRIPTEN__
+ 	glQueryCounter(queries_[numQueries_], GL_TIMESTAMP);
++#endif
+ 	numQueries_++;
+ }
+ 
+@@ -174,6 +178,8 @@ void GLProfiler::End() {
+ 	GLProfilerScope &scope = scopes_[scopeId];
+ 	scope.endQueryId = numQueries_;
+ 
++#ifndef __EMSCRIPTEN__
+ 	glQueryCounter(queries_[numQueries_], GL_TIMESTAMP);
++#endif
+ 	numQueries_++;
+ }
+diff --git a/Common/GPU/OpenGL/GLQueueRunner.cpp b/Common/GPU/OpenGL/GLQueueRunner.cpp
+index 4dd998c03..0529c9cc2 100644
+--- a/Common/GPU/OpenGL/GLQueueRunner.cpp
++++ b/Common/GPU/OpenGL/GLQueueRunner.cpp
+@@ -241,7 +241,7 @@ void GLQueueRunner::RunInitSteps(const FastVec<GLRInitStep> &steps, bool skipGLC
+ 			} else if (gl_extensions.VersionGEThan(3, 0, 0)) {
+ 				glBindFragDataLocation(program->program, 0, "fragColor0");
+ 			}
+-#elif !PPSSPP_PLATFORM(IOS)
++#elif !PPSSPP_PLATFORM(IOS) && !defined(__EMSCRIPTEN__)
+ 			if (gl_extensions.GLES3 && step.create_program.support_dual_source) {
+ 				// For GLES2, we use gl_SecondaryFragColorEXT as fragColor1.
+ 				_dbg_assert_msg_(gl_extensions.EXT_blend_func_extended, "EXT_blend_func_extended required for dual src");
+@@ -1614,7 +1614,7 @@ void GLQueueRunner::PerformCopy(const GLRStep &step) {
+ 	_assert_msg_(caps_.framebufferCopySupported, "Image copy extension expected");
+ 
+ #if defined(USING_GLES2)
+-#if !PPSSPP_PLATFORM(IOS)
++#if !PPSSPP_PLATFORM(IOS) && !defined(__EMSCRIPTEN__)
+ 	glCopyImageSubDataOES(
+ 		srcTex, target, srcLevel, srcRect.x, srcRect.y, srcZ,
+ 		dstTex, target, dstLevel, dstPos.x, dstPos.y, dstZ,
+diff --git a/Common/GPU/OpenGL/gl3stub.c b/Common/GPU/OpenGL/gl3stub.c
+index 9f47314c3..7c32d097e 100644
+--- a/Common/GPU/OpenGL/gl3stub.c
++++ b/Common/GPU/OpenGL/gl3stub.c
+@@ -19,7 +19,7 @@
+ #include "Common/GPU/OpenGL/GLCommon.h"
+ 
+ #if defined(USING_GLES2)
+-#if !PPSSPP_PLATFORM(IOS)
++#if !PPSSPP_PLATFORM(IOS) && !defined(__EMSCRIPTEN__)
+ #include "EGL/egl.h"
+ 
+ GLboolean gl3stubInit() {
+diff --git a/Common/GPU/OpenGL/gl3stub.h b/Common/GPU/OpenGL/gl3stub.h
+index 70f0217f7..26587a53e 100644
+--- a/Common/GPU/OpenGL/gl3stub.h
++++ b/Common/GPU/OpenGL/gl3stub.h
+@@ -47,8 +47,8 @@ extern "C" {
+  * otherwise. */
+ GLboolean gl3stubInit();
+ 
+-#if !PPSSPP_PLATFORM(IOS)
+-    
++#if !PPSSPP_PLATFORM(IOS) && !defined(__EMSCRIPTEN__)
++
+ /*-------------------------------------------------------------------------
+  * Data type definitions
+  *-----------------------------------------------------------------------*/
+diff --git a/Common/MemArenaPosix.cpp b/Common/MemArenaPosix.cpp
+index 8db293a86..9a8f82518 100644
+--- a/Common/MemArenaPosix.cpp
++++ b/Common/MemArenaPosix.cpp
+@@ -148,6 +148,8 @@ void MemArena::ReleaseView(s64 offset, void* view, size_t size) {
+ 	} else {
+ 		munmap(view, size);
+ 	}
++#else
++	free(view);
+ #endif
+ }
+ 
+diff --git a/Common/TimeUtil.cpp b/Common/TimeUtil.cpp
+index ec2f43126..39fb82db1 100644
+--- a/Common/TimeUtil.cpp
++++ b/Common/TimeUtil.cpp
+@@ -13,6 +13,7 @@
+ 
+ #ifdef __EMSCRIPTEN__
+ #include <emscripten/emscripten.h>
++#include <emscripten/threading.h>
+ #endif // __EMSCRIPTEN__
+ 
+ #ifdef _WIN32
+@@ -243,7 +244,7 @@ void sleep_ms(int ms, const char *reason) {
+ #elif defined(HAVE_LIBNX)
+ 	svcSleepThread(ms * 1000000);
+ #elif defined(__EMSCRIPTEN__)
+-	emscripten_sleep(ms);
++	emscripten_thread_sleep(ms);
+ #else
+ 	usleep(ms * 1000);
+ #endif
+@@ -261,7 +262,7 @@ void sleep_us(int us, const char *reason) {
+ #elif defined(HAVE_LIBNX)
+ 	svcSleepThread(us * 1000);
+ #elif defined(__EMSCRIPTEN__)
+-	emscripten_sleep(us / 1000);
++	emscripten_thread_sleep(us / 1000);
+ #else
+ 	usleep(us);
+ #endif
+@@ -318,7 +319,10 @@ void sleep_precise(double seconds, const char *reason) {
+ #elif defined(HAVE_LIBNX)
+ 	svcSleepThread((int64_t)(seconds * 1000000000.0));
+ #elif defined(__EMSCRIPTEN__)
+-	emscripten_sleep(seconds * 1000.0);
++	if (emscripten_is_main_browser_thread())
++		emscripten_sleep((unsigned int)(seconds * 1000.0));
++	else
++		emscripten_thread_sleep(seconds * 1000.0);
+ #else
+ 	usleep(seconds * 1000000.0);
+ #endif
+diff --git a/Core/FileLoaders/RemoteFileLoader.cpp b/Core/FileLoaders/RemoteFileLoader.cpp
+new file mode 100644
+index 000000000..506961dc1
+--- /dev/null
++++ b/Core/FileLoaders/RemoteFileLoader.cpp
+@@ -0,0 +1,70 @@
++// EmuFlow: veja RemoteFileLoader.h. O pedido é uma palavra de estado e quatro de parâmetros na memória compartilhada; o
++// worker responde na mesma memória. Esperar aqui não trava o worker, que continua baixando em segundo plano.
++
++#ifdef __EMSCRIPTEN__
++
++#include <cstring>
++#include <string>
++#include <emscripten/emscripten.h>
++#include <emscripten/threading.h>
++#include <emscripten/atomic.h>
++
++#include "Common/Log.h"
++#include "Core/FileLoaders/RemoteFileLoader.h"
++
++namespace {
++
++enum : int32_t { IDLE = 0, REQUEST = 1, DONE = 2 };
++
++// A disposição é lida por rom-stream.js.
++alignas(16) volatile int32_t g_control[8];  // estado, início (baixo, alto), bytes, destino, bytes lidos
++
++std::string g_name;
++s64 g_size = 0;
++
++}  // namespace
++
++EM_JS(void, rom_stream_start, (const char *url, double size, const char *cacheKey, int32_t *control), {
++	var worker = new Worker(Module.emuflowRomScript);
++	worker.postMessage({ memory: wasmMemory, url: UTF8ToString(url), size: size, cacheKey: UTF8ToString(cacheKey), control: control });
++	Module.emuflowRomWorker = worker;
++});
++
++extern "C" EMSCRIPTEN_KEEPALIVE void emuflow_rom_stream(const char *name, const char *url, double size, const char *cacheKey) {
++	g_name = name;
++	g_size = (s64)size;
++	// Sem nome: o worker não subiu, e o disco volta a ser lido do arquivo baixado.
++	if (!g_name.empty())
++		rom_stream_start(url, size, cacheKey, (int32_t *)g_control);
++}
++
++FileLoader *ConstructRemoteFileLoader(const Path &path) {
++	if (g_name.empty() || path.GetFilename() != g_name)
++		return nullptr;
++	return new RemoteFileLoader(path, g_size);
++}
++
++size_t RemoteFileLoader::ReadAt(s64 absolutePos, size_t bytes, size_t count, void *data, Flags flags) {
++	if (absolutePos >= size_ || bytes == 0 || count == 0)
++		return 0;
++	s64 total = (s64)bytes * (s64)count;
++	if (absolutePos + total > size_)
++		total = size_ - absolutePos;
++
++	std::lock_guard<std::mutex> guard(mutex_);
++	int32_t *control = (int32_t *)g_control;
++	control[1] = (int32_t)(absolutePos & 0xFFFFFFFF);
++	control[2] = (int32_t)(absolutePos >> 32);
++	control[3] = (int32_t)total;
++	control[4] = (int32_t)(intptr_t)data;
++	control[5] = 0;
++	emscripten_atomic_store_u32(&control[0], REQUEST);
++	emscripten_futex_wake(&control[0], 1);
++	while (emscripten_atomic_load_u32(&control[0]) != DONE)
++		emscripten_futex_wait(&control[0], REQUEST, 1000.0);
++	const int32_t read = control[5];
++	emscripten_atomic_store_u32(&control[0], IDLE);
++	return read < 0 ? 0 : (size_t)read / bytes;
++}
++
++#endif
+diff --git a/Core/FileLoaders/RemoteFileLoader.h b/Core/FileLoaders/RemoteFileLoader.h
+new file mode 100644
+index 000000000..3b41ec93d
+--- /dev/null
++++ b/Core/FileLoaders/RemoteFileLoader.h
+@@ -0,0 +1,31 @@
++// EmuFlow: o disco do PSP lido sob demanda pelo worker rom-stream.js, sem a ISO inteira na memória do navegador.
++#pragma once
++
++#ifdef __EMSCRIPTEN__
++
++#include <mutex>
++
++#include "Common/File/Path.h"
++#include "Core/Loaders.h"
++
++class RemoteFileLoader : public FileLoader {
++public:
++	RemoteFileLoader(const Path &path, s64 size) : path_(path), size_(size) {}
++
++	bool Exists() override { return true; }
++	bool IsDirectory() override { return false; }
++	s64 FileSize() override { return size_; }
++	Path GetPath() const override { return path_; }
++	size_t ReadAt(s64 absolutePos, size_t bytes, size_t count, void *data, Flags flags = Flags::NONE) override;
++	using FileLoader::ReadAt;
++
++private:
++	Path path_;
++	s64 size_;
++	std::mutex mutex_;
++};
++
++// O loader do disco, se o site pediu leitura sob demanda para este caminho.
++FileLoader *ConstructRemoteFileLoader(const Path &path);
++
++#endif
+diff --git a/Core/FileSystems/BlockDevices.cpp b/Core/FileSystems/BlockDevices.cpp
+index e87adbaf3..2d063c7fa 100644
+--- a/Core/FileSystems/BlockDevices.cpp
++++ b/Core/FileSystems/BlockDevices.cpp
+@@ -33,7 +33,10 @@
+ #include "Core/FileSystems/BlockDevices.h"
+ #include "Core/FileSystems/ISOFileSystem.h"
+ #include "Core/Util/PathUtil.h"
++
++#ifndef __EMSCRIPTEN__
+ #include "libchdr/chd.h"
++#endif
+ 
+ #include "zlib.h"
+ #include "ext/libkirk/amctrl.h"
+@@ -1051,6 +1054,10 @@ bool NPDRMDemoBlockDevice::ReadBlock(int blockNumber, u8 *outPtr, bool uncached)
+ 	return true;
+ }
+ 
++#ifndef __EMSCRIPTEN__
++
++// static const UINT8 nullsha1[CHD_SHA1_BYTES] = { 0 };
++
+ struct CHDImpl {
+ 	chd_file *chd = nullptr;
+ 	const chd_header *header = nullptr;
+@@ -1225,3 +1232,5 @@ bool CHDFileBlockDevice::ReadBlocks(u32 minBlock, int count, u8 *outPtr) {
+ 	}
+ 	return true;
+ }
++
++#endif //ifndef __EMSCRIPTEN__
+diff --git a/Core/HLE/sceDisplay.cpp b/Core/HLE/sceDisplay.cpp
+index 03eec4b97..011424b41 100644
+--- a/Core/HLE/sceDisplay.cpp
++++ b/Core/HLE/sceDisplay.cpp
+@@ -132,6 +132,15 @@ static double curFrameTime;
+ static double lastFrameTime;
+ static double nextFrameTime;
+ static int numVBlanksSinceFlip;
++#ifdef __EMSCRIPTEN__
++#include <emscripten/em_macros.h>
++// EmuFlow: 0 = vblanks emulados, 1 = flips do jogo. Dao a velocidade real e o FPS do jogo, que o contador
++// de quadros do RetroArch nao mostra (com a thread de emulacao, ele conta quadros repetidos).
++static int emuflowVblanks;
++extern "C" EMSCRIPTEN_KEEPALIVE int emuflow_ppsspp_stat(int which) {
++	return which == 0 ? emuflowVblanks : gpuStats.totals.numFlips;
++}
++#endif
+ // Host timestamp of the last flip we let through, for the fast-forward flip limiter in
+ // __DisplayFlip. Up here with the rest of them so a boot resets it - as a static inside the
+ // function it kept a timestamp from whatever ran before, and the first flip of a new game was
+@@ -521,12 +530,17 @@ static void DoFrameTiming(bool throttle, bool *skipFrame, float scaledTimestep,
+ 			// Wait until we've caught up.
+ 			// If we're ending the frame here, we'll defer the sleep until after the command buffers
+ 			// have been handed off to the render thread, for some more overlap.
++#ifdef __EMSCRIPTEN__
++			WaitUntil(curFrameTime, nextFrameTime, "display-wait");
++			curFrameTime = time_now_d();
++#else
+ 			if (endOfFrame) {
+ 				g_frameTiming.DeferWaitUntil(nextFrameTime, &curFrameTime);
+ 			} else {
+ 				WaitUntil(curFrameTime, nextFrameTime, "display-wait");
+ 				curFrameTime = time_now_d();  // I guess we could also just set it to nextFrameTime...
+ 			}
++#endif
+ 		}
+ 	}
+ 
+@@ -615,6 +629,9 @@ void hleEnterVblank(u64 userdata, int cyclesLate) {
+ 	g_controlMapper.UpdateAutoMovements(CoreTiming::GetGlobalTimeUs() / 1000000.0);
+ 
+ 	numVBlanksSinceFlip++;
++#ifdef __EMSCRIPTEN__
++	emuflowVblanks++;
++#endif
+ 
+ 	// TODO: Should this be done here or in hleLeaveVblank?
+ 	if (framebufIsLatched) {
+diff --git a/Core/HLE/sceRtc.cpp b/Core/HLE/sceRtc.cpp
+index 420cb863c..9bfde5789 100644
+--- a/Core/HLE/sceRtc.cpp
++++ b/Core/HLE/sceRtc.cpp
+@@ -277,6 +277,25 @@ static u32 sceRtcGetTickResolution()
+ 	return hleLogDebug(Log::sceRtc, 1000000);
+ }
+ 
++// EmuFlow: um jogo em espera ativa no relógio passa mais tempo emulado por chamada, e o emulador dá menos voltas até o
++// mesmo instante. Só vale depois de muitas chamadas seguidas, muito próximas: quem lê o relógio de vez em quando não muda.
++int g_rtcSpinExtraCycles = 2700;
++
++static int RtcSpinCycles() {
++	const int NORMAL_CYCLES = 300;
++	const int NEAR_CYCLES = 2000;
++	const int STREAK = 32;
++	static u64 lastTicks = 0;
++	static int lastCycles = 0;
++	static int streak = 0;
++
++	const u64 ticks = CoreTiming::GetTicks(currentMIPS);
++	streak = ticks - lastTicks - lastCycles < (u64)NEAR_CYCLES ? streak + 1 : 0;
++	lastTicks = ticks;
++	lastCycles = streak > STREAK ? NORMAL_CYCLES + g_rtcSpinExtraCycles : NORMAL_CYCLES;
++	return lastCycles;
++}
++
+ static u32 sceRtcGetCurrentTick(u32 tickPtr)
+ {
+ 	VERBOSE_LOG(Log::sceRtc, "sceRtcGetCurrentTick(%08x)", tickPtr);
+@@ -285,7 +304,7 @@ static u32 sceRtcGetCurrentTick(u32 tickPtr)
+ 	if (Memory::IsValid4AlignedRange(tickPtr, 8)) {
+ 		Memory::WriteUnchecked_U64(curTick, tickPtr);
+ 	}
+-	hleEatCycles(300);
++	hleEatCycles(RtcSpinCycles());
+ 	hleReSchedule("rtc current tick");
+ 	return hleNoLog(0);
+ }
+diff --git a/Core/Loaders.cpp b/Core/Loaders.cpp
+index ecf8ba6f5..fd0ebdaa6 100644
+--- a/Core/Loaders.cpp
++++ b/Core/Loaders.cpp
+@@ -36,6 +36,7 @@
+ #include "Core/PSPLoaders.h"
+ #include "Core/MemMap.h"
+ #include "Core/Loaders.h"
++#include "Core/FileLoaders/RemoteFileLoader.h"
+ #include "Core/Core.h"
+ #include "Core/System.h"
+ #include "Core/ELF/PBPReader.h"
+@@ -54,6 +55,10 @@ struct PVD {
+ };
+ 
+ FileLoader *ConstructFileLoader(const Path &filename) {
++#ifdef __EMSCRIPTEN__
++	if (FileLoader *remote = ConstructRemoteFileLoader(filename))
++		return remote;
++#endif
+ 	if (filename.Type() == PathType::HTTP) {
+ 		FileLoader *baseLoader = new RetryingFileLoader(new HTTPFileLoader(filename));
+ 		// For headless, avoid disk caching since it's usually used for tests that might mutate.
+diff --git a/Core/MIPS/IR/IRInterpreter.cpp b/Core/MIPS/IR/IRInterpreter.cpp
+index b399fe4a2..05593f2d1 100644
+--- a/Core/MIPS/IR/IRInterpreter.cpp
++++ b/Core/MIPS/IR/IRInterpreter.cpp
+@@ -141,7 +141,8 @@ void IRRunKernelStore(MIPSState *mips, u32 addr, u32 value, u32 op) {
+ // Clang keeps one jump per op only while the shared tail stays small, and a direct goto to a handler
+ // label also makes it give up, leaving a single indirect jump (10-15% slower). Count the `br`s in
+ // the disassembly after changing the dispatch.
+-#if defined(__GNUC__) || defined(__clang__)
++// EmuFlow: no wasm nao ha salto indireto; o despacho por tabela vira uma funcao enorme, mais lenta.
++#if (defined(__GNUC__) || defined(__clang__)) && !defined(__EMSCRIPTEN__)
+ #define IR_THREADED_DISPATCH 1
+ #define IR_CASE(op) case IROp::op: L_##op:
+ #else
+diff --git a/Core/MIPS/MIPS.cpp b/Core/MIPS/MIPS.cpp
+index 05c319e1d..979343079 100644
+--- a/Core/MIPS/MIPS.cpp
++++ b/Core/MIPS/MIPS.cpp
+@@ -96,7 +96,7 @@ static inline void ARM32WriteFPSCR(u32 fpscr) {
+ // to read the register. Our bits are cleared in it, in case a JIT's asm stub had already set them.
+ // Only the CPU thread calls these.
+ static bool g_hostModeSaved = false;
+-#if PPSSPP_ARCH(SSE2)
++#if PPSSPP_ARCH(SSE2) && !defined(__EMSCRIPTEN__)
+ static u32 g_savedHostMode;
+ #elif PPSSPP_ARCH(ARM64)
+ static u64 g_savedHostMode;
+@@ -113,7 +113,7 @@ void ApplyHostRoundingMode(const MIPSState *mips) {
+ 	}
+ 	int rmode = fcr1Bits & 3;
+ 	bool ftz = (fcr1Bits & 0x01000000) != 0;
+-#if PPSSPP_ARCH(SSE2)
++#if PPSSPP_ARCH(SSE2) && !defined(__EMSCRIPTEN__)
+ 	if (!g_hostModeSaved) {
+ 		g_savedHostMode = _mm_getcsr() & ~0xE040;
+ 		g_hostModeSaved = true;
+@@ -163,7 +163,7 @@ void ApplyHostRoundingMode(const MIPSState *mips) {
+ void RestoreHostRoundingMode(bool force) {
+ 	if (!g_hostModeSaved) {
+ 		if (force) {
+-#if PPSSPP_ARCH(SSE2)
++#if PPSSPP_ARCH(SSE2) && !defined(__EMSCRIPTEN__)
+ 			_mm_setcsr(_mm_getcsr() & ~0xE040);
+ #elif PPSSPP_ARCH(ARM64)
+ 			ARM64WriteFPCR(ARM64ReadFPCR() & ~(7 << 22));
+@@ -176,7 +176,7 @@ void RestoreHostRoundingMode(bool force) {
+ 		return;
+ 	}
+ 	g_hostModeSaved = false;
+-#if PPSSPP_ARCH(SSE2)
++#if PPSSPP_ARCH(SSE2) && !defined(__EMSCRIPTEN__)
+ 	_mm_setcsr(g_savedHostMode);
+ #elif PPSSPP_ARCH(ARM64)
+ 	ARM64WriteFPCR(g_savedHostMode);
+diff --git a/ext/xxhash.h b/ext/xxhash.h
+index 79ead5f89..af2c5d9cb 100644
+--- a/ext/xxhash.h
++++ b/ext/xxhash.h
+@@ -3878,7 +3878,7 @@ XXH_PUBLIC_API XXH64_hash_t XXH64_hashFromCanonical(XXH_NOESCAPE const XXH64_can
+ #  if defined(__ARM_NEON__) || defined(__ARM_NEON) \
+    || (defined(_M_ARM) && _M_ARM >= 7) \
+    || defined(_M_ARM64) || defined(_M_ARM64EC) \
+-   || (defined(__wasm_simd128__) && XXH_HAS_INCLUDE(<arm_neon.h>)) /* WASM SIMD128 via SIMDe */
++   || (defined(__wasm_simd128__) && !defined(__EMSCRIPTEN__) && XXH_HAS_INCLUDE(<arm_neon.h>)) /* WASM SIMD128 via SIMDe */
+ #    define inline __inline__  /* circumvent a clang bug */
+ #    include <arm_neon.h>
+ #    undef inline
+@@ -4009,7 +4009,7 @@ XXH_PUBLIC_API XXH64_hash_t XXH64_hashFromCanonical(XXH_NOESCAPE const XXH64_can
+ #  if ( \
+         defined(__ARM_NEON__) || defined(__ARM_NEON) /* gcc */ \
+      || defined(_M_ARM) || defined(_M_ARM64) || defined(_M_ARM64EC) /* msvc */ \
+-     || (defined(__wasm_simd128__) && XXH_HAS_INCLUDE(<arm_neon.h>)) /* wasm simd128 via SIMDe */ \
++     || (defined(__wasm_simd128__) && !defined(__EMSCRIPTEN__) && XXH_HAS_INCLUDE(<arm_neon.h>)) /* wasm simd128 via SIMDe */ \
+    ) && ( \
+         defined(_WIN32) || defined(__LITTLE_ENDIAN__) /* little endian only */ \
+     || (defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__) \
+diff --git a/libretro/LibretroGLContext.h b/libretro/LibretroGLContext.h
+index b62fb5b11..d19273a95 100644
+--- a/libretro/LibretroGLContext.h
++++ b/libretro/LibretroGLContext.h
+@@ -8,7 +8,9 @@
+ class LibretroGLContext : public LibretroHWRenderContext {
+ public:
+ 	LibretroGLContext()
+-#ifdef USING_GLES2
++#ifdef __EMSCRIPTEN__
++		: LibretroHWRenderContext(RETRO_HW_CONTEXT_OPENGLES3, 3, 0)
++#elif defined(USING_GLES2)
+ 		: LibretroHWRenderContext(RETRO_HW_CONTEXT_OPENGLES2)
+ #else
+ 		: LibretroHWRenderContext(RETRO_HW_CONTEXT_OPENGL)
+diff --git a/libretro/Makefile b/libretro/Makefile
+index 3408ad1ce..faf081555 100644
+--- a/libretro/Makefile
++++ b/libretro/Makefile
+@@ -279,6 +279,8 @@ else ifeq ($(platform), emscripten)
+ 	GLES = 1
+ 	TARGET := $(TARGET_NAME)_libretro_emscripten.bc
+ 	PLATCFLAGS += -msimd128 -msse3 -mssse3 -msse4.1 -pthread -D__EMSCRIPTEN__ -DNO_MMAP
++	# O caminho NEON do xxhash 0.8.4 não compila no Emscripten 3.1.74; o de SSE2 vira SIMD do wasm.
++	PLATCFLAGS += -DXXH_VECTOR=1
+ 	PLATFORM_EXT = emscripten
+ 	STATIC_LINKING = 1
+ 
+@@ -395,11 +397,8 @@ else
+ endif
+ 
+ COREFLAGS += -D__LIBRETRO__ -DPPSSPP -DWITH_UPNP -DGLEW_STATIC -DGLEW_NO_GLU -DMINIUPNP_STATICLIB
+-ifneq ($(platform), emscripten)
+-	# ffmpeg does not work with emscripten
+-	COREFLAGS += -DUSE_FFMPEG
+-	BUILD_FFMPEG := 1
+-endif
++COREFLAGS += -DUSE_FFMPEG
++BUILD_FFMPEG := 1
+ 
+ # FFmpeg, from the sources in ext/ffmpeg (see its README.md). Its own include directories go first,
+ # so its config.h wins over the other config.h files on the include path.
+diff --git a/libretro/Makefile.common b/libretro/Makefile.common
+index 02bb845a5..facdeb083 100644
+--- a/libretro/Makefile.common
++++ b/libretro/Makefile.common
+@@ -265,6 +265,8 @@ SOURCES_C += \
+ COREFLAGS += -DSTACK_LINE_READER_BUFFER_SIZE=1024
+ COREFLAGS += -DHTTPS_NOT_AVAILABLE
+ 
++ifneq ($(platform), emscripten)
++
+ COREFLAGS += -DZ7_ST
+ INCFLAGS += -I$(EXTDIR)/libchdr/deps/lzma-24.05/include
+ 
+@@ -290,6 +292,8 @@ SOURCES_C += \
+ 	$(EXTDIR)/libchdr/src/libchdr_flac.c \
+ 	$(EXTDIR)/libchdr/src/libchdr_huffman.c
+ 
++endif
++
+ INCFLAGS += -I$(EXTDIR)/at3_standalone
+ 
+ SOURCES_CXX += \
+@@ -734,6 +738,7 @@ SOURCES_CXX += \
+ 	       $(COREDIR)/FileLoaders/RetryingFileLoader.cpp \
+ 	       $(COREDIR)/FileLoaders/RamCachingFileLoader.cpp \
+ 	       $(COREDIR)/FileLoaders/LocalFileLoader.cpp \
++	       $(COREDIR)/FileLoaders/RemoteFileLoader.cpp \
+ 	       $(COREDIR)/FileLoaders/PS1EbootFileLoader.cpp \
+ 	       $(COREDIR)/FileLoaders/ZipFileLoader.cpp \
+ 	       $(COREDIR)/CoreTiming.cpp \
+diff --git a/libretro/emscripten/build_emscripten.sh b/libretro/emscripten/build_emscripten.sh
+new file mode 100755
+index 000000000..cfc2eb2cc
+--- /dev/null
++++ b/libretro/emscripten/build_emscripten.sh
+@@ -0,0 +1,28 @@
++#!/bin/bash
++set -e
++
++cd "$(dirname "$0")"
++cd ../../
++
++git submodule update --init --recursive
++
++cd ffmpeg
++cp ../libretro/emscripten/linux_wasm32.sh ./
++bash linux_wasm32.sh
++cd ../
++
++sed -i 's|return getauxval(hwcap_type);|return 1;|g' ext/cpu_features/src/hwcaps.c
++sed -i 's|#include <sys/auxv.h>||g' ext/cpu_features/src/hwcaps.c
++
++sed -i 's|#ifndef __linux__|#ifdef SO_NOSIGPIPE|g' ext/aemu_postoffice/client/sock_impl_linux.c
++
++cd ext/armips/ext/
++rm -rf filesystem
++git clone https://github.com/gulrak/filesystem.git filesystem
++
++cd ../../../libretro/
++emmake make platform=emscripten -j$(nproc)
++
++mkdir -p emscripten/build/
++cp *.bc emscripten/build/
++cp ../ffmpeg/linux/wasm32/lib/*.a emscripten/build/
+diff --git a/libretro/emscripten/linux_wasm32.sh b/libretro/emscripten/linux_wasm32.sh
+new file mode 100755
+index 000000000..1ba3cd2ac
+--- /dev/null
++++ b/libretro/emscripten/linux_wasm32.sh
+@@ -0,0 +1,117 @@
++#!/bin/sh
++
++rm -f config.h
++echo "Building for Linux wasm32"
++
++set -e
++
++ARCH="wasm32"
++
++GENERAL="
++    --disable-shared \
++    --enable-static"
++
++MODULES="\
++    --disable-avdevice \
++    --disable-filters \
++    --disable-programs \
++    --disable-network \
++    --disable-avfilter \
++    --disable-postproc \
++    --disable-encoders \
++    --disable-doc \
++    --disable-ffplay \
++    --disable-ffprobe \
++    --disable-ffserver \
++    --disable-ffmpeg"
++
++VIDEO_DECODERS="\
++    --enable-decoder=h264 \
++    --enable-decoder=mpeg4 \
++    --enable-decoder=h263 \
++    --enable-decoder=h263p \
++    --enable-decoder=mpeg2video \
++    --enable-decoder=mjpeg \
++    --enable-decoder=mjpegb"
++
++AUDIO_DECODERS="\
++    --enable-decoder=aac \
++    --enable-decoder=aac_latm \
++    --enable-decoder=atrac3 \
++    --enable-decoder=atrac3p \
++    --enable-decoder=mp3 \
++    --enable-decoder=pcm_s16le \
++    --enable-decoder=pcm_s8"
++
++DEMUXERS="\
++    --enable-demuxer=h264 \
++    --enable-demuxer=h263 \
++    --enable-demuxer=m4v \
++    --enable-demuxer=mpegps \
++    --enable-demuxer=mpegvideo \
++    --enable-demuxer=avi \
++    --enable-demuxer=mp3 \
++    --enable-demuxer=aac \
++    --enable-demuxer=pmp \
++    --enable-demuxer=oma \
++    --enable-demuxer=pcm_s16le \
++    --enable-demuxer=pcm_s8 \
++    --enable-demuxer=wav"
++
++VIDEO_ENCODERS="\
++    --enable-encoder=ffv1 \
++    --enable-encoder=huffyuv \
++    --enable-encoder=mpeg4"
++
++AUDIO_ENCODERS="\
++    --enable-encoder=pcm_s16le"
++
++MUXERS="\
++    --enable-muxer=avi"
++
++PARSERS="\
++    --enable-parser=h264 \
++    --enable-parser=mpeg4video \
++    --enable-parser=mpegvideo \
++    --enable-parser=aac \
++    --enable-parser=aac_latm \
++    --enable-parser=mpegaudio"
++
++PROTOCOLS="\
++    --enable-protocol=file"
++
++emconfigure ./configure \
++    --prefix=./linux/${ARCH} \
++    ${GENERAL} \
++    --extra-cflags="-pthread -O3" \
++    --enable-zlib \
++    --disable-yasm \
++    --disable-everything \
++    ${MODULES} \
++    ${VIDEO_DECODERS} \
++    ${AUDIO_DECODERS} \
++    ${VIDEO_ENCODERS} \
++    ${AUDIO_ENCODERS} \
++    ${DEMUXERS} \
++    ${MUXERS} \
++    ${PARSERS} \
++    ${PROTOCOLS} \
++    --target-os=none \
++    --arch=x86_32 \
++    --enable-cross-compile \
++    --disable-asm \
++    --disable-stripping \
++    --disable-programs \
++    --disable-doc \
++    --disable-debug \
++    --disable-runtime-cpudetect \
++    --nm=emnm \
++    --ar=emar \
++    --ranlib=emranlib \
++    --cc=emcc \
++    --cxx=em++ \
++    --objcc=emcc \
++    --dep-cc=emcc
++
++emmake make clean
++emmake make install -j$(nproc)
+diff --git a/libretro/libretro.cpp b/libretro/libretro.cpp
+index b6f3fa5c7..26168c94c 100644
+--- a/libretro/libretro.cpp
++++ b/libretro/libretro.cpp
+@@ -1,6 +1,7 @@
+ #include "ppsspp_config.h"
+ #include "libretro/LibretroVR.h"
+ #include <array>
++#include <algorithm>
+ #include <cstring>
+ #include <cassert>
+ #include <thread>
+@@ -513,12 +514,39 @@ static std::string map_psp_language_to_i18n_locale(int val)
+ }
+ 
+ static void check_dynamic_variables(CoreParameter &coreParam) {
++#ifdef __EMSCRIPTEN__
++   struct retro_throttle_state throttle = { RETRO_THROTTLE_NONE, 0.0f };
++   if (environ_cb(RETRO_ENVIRONMENT_GET_THROTTLE_STATE, &throttle)) {
++      switch (throttle.mode) {
++         case RETRO_THROTTLE_FAST_FORWARD:
++            if (throttle.rate > 0.0f) {
++               coreParam.fpsLimit       = FPSLimit::ANALOG;
++               coreParam.analogFpsLimit = (int)(throttle.rate + 0.5f);
++               coreParam.fastForward    = false;
++            } else {
++               coreParam.fpsLimit    = FPSLimit::NORMAL;
++               coreParam.fastForward = true;
++            }
++            break;
++         case RETRO_THROTTLE_SLOW_MOTION:
++            coreParam.fpsLimit       = FPSLimit::ANALOG;
++            coreParam.analogFpsLimit = std::max(1, (int)(throttle.rate + 0.5f));
++            coreParam.fastForward    = false;
++            break;
++         default:
++            coreParam.fpsLimit    = FPSLimit::NORMAL;
++            coreParam.fastForward = false;
++            break;
++      }
++   }
++#else
+    if (g_Config.bForceLagSync)
+    {
+       bool isFastForwarding;
+       if (environ_cb(RETRO_ENVIRONMENT_GET_FASTFORWARDING, &isFastForwarding))
+          coreParam.fastForward = isFastForwarding;
+    }
++#endif
+ }
+ 
+ static void check_variables(CoreParameter &coreParam)
+@@ -575,7 +603,6 @@ static void check_variables(CoreParameter &coreParam)
+          g_Config.iLanguage = PSP_SYSTEMPARAM_LANGUAGE_CHINESE_SIMPLIFIED;
+    }
+ 
+-#ifndef __EMSCRIPTEN__
+    var.key = "ppsspp_cpu_core";
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+    {
+@@ -593,9 +620,6 @@ static void check_variables(CoreParameter &coreParam)
+        // to experiment in future iOS versions or something...
+        g_Config.iCpuCore = (int)CPUCore::IR_INTERPRETER;
+    }
+-#else
+-   g_Config.iCpuCore = (int)CPUCore::INTERPRETER;
+-#endif
+ 
+    var.key = "ppsspp_fast_memory";
+    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value)
+@@ -1577,9 +1601,11 @@ bool retro_load_game(const struct retro_game_info *game) {
+ 
+    useEmuThread              = ctx->GetGPUCore() == GPUCORE_GLES;
+ 
+-   // default to interpreter to allow startup in platforms w/o JIT capability
+-   // TODO: I guess we should auto detect? And also, default to IR Interpreter...
++#ifdef __EMSCRIPTEN__
++   g_Config.iCpuCore         = (int)CPUCore::IR_INTERPRETER;
++#else
+    g_Config.iCpuCore         = (int)CPUCore::INTERPRETER;
++#endif
+ 
+    CoreParameter coreParam   = {};
+    coreParam.enableSound     = true;
+@@ -2076,6 +2102,8 @@ bool System_GetPropertyBool(SystemProperty prop) {
+ #if PPSSPP_PLATFORM(IOS)
+       bool can_jit;
+       return (environ_cb(RETRO_ENVIRONMENT_GET_JIT_CAPABLE, &can_jit) && can_jit);
++#elif defined(__EMSCRIPTEN__)
++      return false;
+ #else
+       return true;
+ #endif
+diff --git a/libretro/libretro_core_options.h b/libretro/libretro_core_options.h
+index 59e190f0b..cbec363d6 100644
+--- a/libretro/libretro_core_options.h
++++ b/libretro/libretro_core_options.h
+@@ -135,7 +135,11 @@ struct retro_core_option_v2_definition option_defs_us[] = {
+          { "Interpreter", NULL },
+          { NULL, NULL },
+       },
++#ifdef __EMSCRIPTEN__
++      "IR JIT"
++#else
+       "JIT"
++#endif
+    },
+    {
+       "ppsspp_fast_memory",

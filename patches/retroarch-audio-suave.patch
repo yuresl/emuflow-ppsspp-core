@@ -1,0 +1,19 @@
+--- a/audio/audio_driver.c
++++ b/audio/audio_driver.c
+@@ -518,9 +518,16 @@
+          double direction            = (double)delta_mid / half_size;
+          double adjust               = 1.0 + audio_st->rate_control_delta * direction;
+ 
++#ifdef EMSCRIPTEN
++         /* EmuFlow: o nivel do buffer oscila a cada lote; sem suavizar, um delta
++          * alto faz o tom tremer. Assim o tom muda aos poucos, em ~1 s. */
++         static double adjust_smooth = 1.0;
++         adjust_smooth += (adjust - adjust_smooth) * 0.03;
++         adjust = adjust_smooth;
++#endif
+          audio_st->free_samples_buf[write_idx] = avail;
+          audio_st->src_ratio_curr = audio_st->src_ratio_orig * adjust;
+ 
+ #if 0
+          if (verbosity_is_enabled())
+          {
